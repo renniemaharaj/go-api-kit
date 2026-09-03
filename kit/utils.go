@@ -2,56 +2,68 @@ package kit
 
 import (
 	"errors"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
-func (h Handle) Text(code int, text string) {
-	h.w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	h.w.WriteHeader(code)
-	_, _ = io.WriteString(h.w, text)
-}
-
 func (h Handle) DistFile(path string) {
-	path = strings.TrimPrefix(path, "/")
-	path = filepath.Clean(path)
-
-	if path == "." {
-		path = "index.html"
-	}
-
-	if path == ".." || strings.HasPrefix(path, "../") {
-		http.Error(h.w, "Invalid file path", http.StatusBadRequest)
+	root, err := filepath.Abs("dist")
+	if err != nil {
+		h.Error.Internal("Internal Server Error")
 		return
 	}
 
-	h.File(filepath.Join("dist", path))
+	path = filepath.Clean(filepath.FromSlash(path))
+	if path == "." || path == string(filepath.Separator) {
+		path = "index.html"
+	}
+	if filepath.IsAbs(path) {
+		path = path[1:]
+	}
+
+	filename := filepath.Join(root, path)
+	if !within(root, filename) {
+		h.Error.BadRequest("Invalid file path")
+		return
+	}
+
+	resolved, err := filepath.EvalSymlinks(filename)
+	if err == nil && !within(root, resolved) {
+		h.Error.BadRequest("Invalid file path")
+		return
+	}
+
+	h.File(filename)
+}
+
+func within(root, filename string) bool {
+	rel, err := filepath.Rel(root, filename)
+	return err == nil && rel != ".." && !filepath.IsAbs(rel) &&
+		(len(rel) < 3 || rel[:3] != ".."+string(filepath.Separator))
 }
 
 func (h Handle) File(filename string) {
 	file, err := os.Open(filename)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			http.NotFound(h.w, h.r)
+			h.Error.NotFound("Not Found")
 			return
 		}
 
-		http.Error(h.w, "Internal Server Error", http.StatusInternalServerError)
+		h.Error.Internal("Internal Server Error")
 		return
 	}
 	defer file.Close()
 
 	info, err := file.Stat()
 	if err != nil {
-		http.Error(h.w, "Internal Server Error", http.StatusInternalServerError)
+		h.Error.Internal("Internal Server Error")
 		return
 	}
 
 	if info.IsDir() {
-		http.NotFound(h.w, h.r)
+		h.Error.NotFound("Not Found")
 		return
 	}
 

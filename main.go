@@ -7,18 +7,18 @@ import (
 )
 
 func main() {
-	mux := http.NewServeMux()
+	k := kit.New()
 
-	mux.HandleFunc("/", kit.NewHandler(func(h kit.Handle) {
+	k.Get("/*", func(h kit.Handle) {
 		if h.Path() == "/" {
 			h.DistFile("index.html")
 			return
 		}
 
 		h.DistFile(h.Path())
-	}))
+	})
 
-	err := http.ListenAndServe("localhost:8000", mux)
+	err := http.ListenAndServe("localhost:8000", k)
 	if err != nil {
 		panic(err)
 	}

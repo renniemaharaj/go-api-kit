@@ -1,0 +1,17 @@
+#!/bin/sh
+
+set -eu
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+echo "pre-commit: running tests"
+go test ./...
+
+echo "pre-commit: running vet"
+go vet ./...
+
+echo "pre-commit: building all packages"
+go build ./...
+
+echo "pre-commit: quality gate passed"
