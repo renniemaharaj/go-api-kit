@@ -15,18 +15,13 @@ func (f rootFS) Open(name string) (fs.File, error) {
 	return f.root.Open(name)
 }
 
-func Run(dir, addr, port string) func() {
-	return func() {
-		root, err := os.OpenRoot(dir)
-		if err != nil {
-			panic(err)
-		}
-		defer root.Close()
-
-		handler := http.FileServerFS(rootFS{root})
-		err = http.ListenAndServe(net.JoinHostPort(addr, port), handler)
-		if err != nil {
-			panic(err)
-		}
+func Run(dir, addr, port string) error {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
 	}
+	defer root.Close()
+
+	handler := http.FileServerFS(rootFS{root})
+	return http.ListenAndServe(net.JoinHostPort(addr, port), handler)
 }

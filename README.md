@@ -24,12 +24,14 @@ go get github.com/renniemaharaj/go-api-kit
 package main
 
 import (
+	"log"
+
 	v8 "github.com/renniemaharaj/go-api-kit/v8"
 )
 
 func main() {
-	if v8 := v8.Run("dist", "localhost", "9100"); v8 != nil {
-		v8()
+	if err := v8.Run("dist", "localhost", "9100"); err != nil {
+		log.Fatal(err)
 	}
 }
 ```
@@ -83,5 +85,7 @@ The `v8` package can serve a frontend directory directly. Its filesystem root
 is confined to the directory passed to `Run`:
 
 ```go
-v8.Run("dist", "localhost", "9100")()
+if err := v8.Run("dist", "localhost", "9100"); err != nil {
+	log.Fatal(err)
+}
 ```

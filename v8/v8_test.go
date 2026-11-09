@@ -1,6 +1,7 @@
 package v8
 
 import (
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +10,29 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestRunReturnsRootOpenError(t *testing.T) {
+	err := Run(filepath.Join(t.TempDir(), "missing"), "localhost", "0")
+	if err == nil {
+		t.Fatal("expected an error for a missing frontend directory")
+	}
+}
+
+func TestRunReturnsListenError(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	host, port, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Run(t.TempDir(), host, port); err == nil {
+		t.Fatal("expected an error for an address that is already in use")
+	}
+}
 
 func TestDirectoryHandlerServesFrontendFiles(t *testing.T) {
 	dir := t.TempDir()
