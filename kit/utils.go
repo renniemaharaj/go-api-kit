@@ -2,45 +2,57 @@ package kit
 
 import (
 	"errors"
+	"io/fs"
 	"net/http"
 	"os"
-	"path/filepath"
+	"strings"
 )
 
-func (h Handle) DistFile(path string) {
-	root, err := filepath.Abs("dist")
+func (h Handle) StaticFS(fsys fs.FS, path string) {
+	path = strings.TrimPrefix(path, "/")
+
+	if path == "" {
+		path = "index.html"
+	}
+
+	if !fs.ValidPath(path) {
+		h.Error.BadRequest("Invalid file path")
+		return
+	}
+
+	file, err := fsys.Open(path)
+	if err != nil {
+		switch {
+		case errors.Is(err, fs.ErrPermission):
+			h.Error.BadRequest("Invalid file path")
+		case errors.Is(err, fs.ErrNotExist):
+			h.Error.NotFound("Not Found")
+		default:
+			h.Error.Internal("Internal Server Error")
+		}
+		return
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
 	if err != nil {
 		h.Error.Internal("Internal Server Error")
 		return
 	}
 
-	path = filepath.Clean(filepath.FromSlash(path))
-	if path == "." || path == string(filepath.Separator) {
-		path = "index.html"
-	}
-	if filepath.IsAbs(path) {
-		path = path[1:]
-	}
-
-	filename := filepath.Join(root, path)
-	if !within(root, filename) {
-		h.Error.BadRequest("Invalid file path")
+	if info.IsDir() {
+		h.Error.NotFound("Not Found")
 		return
 	}
 
-	resolved, err := filepath.EvalSymlinks(filename)
-	if err == nil && !within(root, resolved) {
-		h.Error.BadRequest("Invalid file path")
-		return
+	request := h.Request().Clone(h.Request().Context())
+	request.URL.Path = "/" + path
+
+	if path == "index.html" {
+		request.URL.Path = "/"
 	}
 
-	h.File(filename)
-}
-
-func within(root, filename string) bool {
-	rel, err := filepath.Rel(root, filename)
-	return err == nil && rel != ".." && !filepath.IsAbs(rel) &&
-		(len(rel) < 3 || rel[:3] != ".."+string(filepath.Separator))
+	http.FileServerFS(fsys).ServeHTTP(h.Writer(), request)
 }
 
 func (h Handle) File(filename string) {

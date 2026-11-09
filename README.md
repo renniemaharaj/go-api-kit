@@ -1,13 +1,21 @@
-# go-handler-kit
+# go-api-kit
 
-`go-handler-kit` is a small, ergonomic HTTP handler library for Go. It uses
+<p align="center">
+	<img src="dist/assets/v8.png" alt="Go API Kit app icon" width="96">
+</p>
+
+`go-api-kit` is a small, ergonomic HTTP handler library for Go. It uses
 [chi](https://github.com/go-chi/chi) internally for routing while keeping its
 public API compatible with `net/http`.
+
+<p align="center">
+	<img src="dist/assets/welcome.svg" alt="Go API Kit server-ready welcome artwork" width="720">
+</p>
 
 ## Installation
 
 ```bash
-go get github.com/renniemaharaj/go-handler-kit
+go get github.com/renniemaharaj/go-api-kit
 ```
 
 ## Quick start
@@ -16,23 +24,13 @@ go get github.com/renniemaharaj/go-handler-kit
 package main
 
 import (
-	"net/http"
-
-	"github.com/renniemaharaj/go-handler-kit/kit"
+	v8 "github.com/renniemaharaj/go-api-kit/v8"
 )
 
 func main() {
-	k := kit.New()
-
-	k.Get("/", func(h kit.Handle) {
-		h.Text(http.StatusOK, "Hello World")
-	})
-
-	k.Get("/users/{id}", func(h kit.Handle) {
-		_ = h.JSON(http.StatusOK, map[string]string{"id": h.Param("id")})
-	})
-
-	http.ListenAndServe(":8000", k)
+	if v8 := v8.Run("dist", "localhost", "9100"); v8 != nil {
+		v8()
+	}
 }
 ```
 
@@ -68,7 +66,7 @@ func createUser(h kit.Handle) {
 ```
 
 Common response operations stay directly on `Handle`: `JSON`, `Text`, `HTML`,
-`Status`, `NoContent`, `Redirect`, `File`, and `DistFile`. Cohesive operations
+`Status`, `NoContent`, `Redirect`, `File`, and `StaticFS`. Cohesive operations
 are grouped under `h.Error` and `h.Header`. `Request()` and `Writer()` expose
 the underlying standard-library values whenever direct access is clearer.
 
@@ -77,9 +75,13 @@ the underlying standard-library values whenever direct access is clearer.
 ```go
 mux := http.NewServeMux()
 mux.HandleFunc("GET /", kit.NewHandler(func(h kit.Handle) {
-	h.DistFile("index.html")
+	h.StaticFS(os.DirFS("dist"), "index.html")
 }))
 ```
 
-`DistFile` serves from `./dist` and rejects paths or symlinks that escape that
-directory.
+The `v8` package can serve a frontend directory directly. Its filesystem root
+is confined to the directory passed to `Run`:
+
+```go
+v8.Run("dist", "localhost", "9100")()
+```

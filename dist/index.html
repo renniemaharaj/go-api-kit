@@ -2,16 +2,57 @@
 <html lang="en">
 
 <head>
-  <meta charset="UTF-8" />
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>webserver</title>
-  <script type="module" crossorigin src="/assets/index-Pc2qGNCj.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-CsUDhMuy.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f8f7">
+  <meta name="description" content="Your Go API Kit server is up and ready.">
+  <link rel="icon" type="image/png" href="/assets/v8.png">
+  <link rel="apple-touch-icon" href="/assets/v8.png">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <title>Go API Kit | Server Ready</title>
 </head>
 
 <body>
-  <div id="app"></div>
+  <div class="frame">
+    <header>
+      <a class="brand" href="https://github.com/renniemaharaj/go-api-kit">
+        <img src="/assets/v8.png" alt="">
+        <span>go-api-kit</span>
+      </a>
+      <span class="status">Server ready</span>
+    </header>
+
+    <main>
+      <div class="mark-wrap">
+        <img class="mark" src="/assets/v8.png" alt="Go API Kit app icon" width="300" height="300">
+      </div>
+      <section class="content" aria-labelledby="welcome-title">
+        <p class="eyebrow">HTTP server / ready</p>
+        <h1 id="welcome-title">Your Go API Kit is running.</h1>
+        <p class="intro">Your server is up and ready. Time to build something great.</p>
+        <div class="command-row">
+          <code><span>$</span>go run .</code>
+          <button id="copy-command" type="button">Copy command</button>
+        </div>
+        <a class="repo-link" href="https://github.com/renniemaharaj/go-api-kit" target="_blank"
+          rel="noopener noreferrer">Open GitHub repository</a>
+      </section>
+    </main>
+
+    <footer>Built with Go · Powered by Go API Kit</footer>
+  </div>
+  <script>
+    const copyButton = document.querySelector("#copy-command");
+    copyButton.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText("go run .");
+        copyButton.textContent = "Copied";
+      } catch {
+        copyButton.textContent = "Copy unavailable";
+      }
+      window.setTimeout(() => { copyButton.textContent = "Copy command"; }, 1800);
+    });
+  </script>
 </body>
 
 </html>

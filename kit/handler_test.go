@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/renniemaharaj/go-handler-kit/kit"
+	"github.com/renniemaharaj/go-api-kit/kit"
 )
 
 func TestHandleUnmarshalJSONDecodesRequestBody(t *testing.T) {

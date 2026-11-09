@@ -1,4 +1,4 @@
-module github.com/renniemaharaj/go-handler-kit
+module github.com/renniemaharaj/go-api-kit
 
 go 1.25.3
 
