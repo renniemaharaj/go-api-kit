@@ -4,10 +4,12 @@ Middleware lives in `kit` and is installed automatically by `kit.New()` and `v8`
 Applications configure the default stack through `.env` or process variables.
 
 ```go
-return v8.Run(resource.Definition(kit.RequireSubject("id")))
+return v8.Run(func(router *kit.Router) {
+	router.With(kit.RequireSubject("id")).Get("/users/{id}", showUser)
+})
 ```
 
-The resource declares its access policy. Kit handles construction of the shared
+The route declares its access policy. Kit handles construction of the shared
 middleware and runs subject checks after route parameters have been matched.
 
 ## Environment settings
@@ -40,7 +42,7 @@ variables, execute shell commands, or modify the process environment.
 | Setting | Default or behavior |
 | --- | --- |
 | `SERVER_ADDRESS` | `localhost:9100` |
-| `FRONTEND_DIR` | Empty serves only resources; set a directory to serve files |
+| `FRONTEND_DIR` | Empty serves APIs and health; set a directory to serve files |
 | `SERVER_READ_HEADER_TIMEOUT` | `5s` |
 | `SERVER_READ_TIMEOUT` | Request timeout plus five seconds |
 | `SERVER_WRITE_TIMEOUT` | Request timeout plus five seconds |
@@ -48,8 +50,6 @@ variables, execute shell commands, or modify the process environment.
 | `FILE_CACHE_TTL` | `1m`; `0s` disables the file-content cache |
 | `FILE_CACHE_MAX_ENTRIES` | `64` |
 | `FILE_CACHE_MAX_BYTES` | `1048576` |
-| `RESOURCE_CACHE_TTL` | `1m` for `NewResourceFromEnv`; `0s` disables caching |
-| `RESOURCE_CACHE_MAX_ENTRIES` | `1024`; `NAME_CACHE_*` overrides individual resources |
 | `REQUEST_TIMEOUT` | `15s`, must be positive |
 | `RATE_LIMIT_REQUESTS` | `60` |
 | `RATE_LIMIT_INTERVAL` | `1s` |
@@ -75,7 +75,7 @@ variables, execute shell commands, or modify the process environment.
 
 Set `JWT_ENABLED=true` to require authentication even before a key has been
 provided; startup will then fail until valid credentials are configured.
-`JWT_ENABLED=false` explicitly disables shared JWT verification. Resource access
+`JWT_ENABLED=false` explicitly disables shared JWT verification. Route access
 checks still apply. Requiring roles without JWT authentication is a startup error.
 
 ## Default request order
@@ -85,11 +85,11 @@ checks still apply. Requiring roles without JWT authentication is a startup erro
 3. CORS, when allowed origins are configured.
 4. JWT authentication, when enabled.
 5. Required JWT roles, when configured.
-6. Resource middleware, matched-route middleware, and the handler.
+6. Group middleware, matched-route middleware, and the handler.
 
 CORS preflights can complete without authentication. Rate limiting still counts
 them, along with denied credentials, missing routes, cache hits, and cache misses.
-Resource and route middleware run after matching parameters, so
+Group and route middleware run after matching parameters, so
 `kit.RequireSubject("id")` can compare the requested ID to the verified subject.
 It does not grant administrators an implicit exemption.
 
@@ -108,7 +108,9 @@ For v8 application wiring with an explicit stack:
 ```go
 handler, err := v8.NewHandlerWithMiddleware(fsys,
 	[]kit.Middleware{customAuthentication, customLogging},
-	resource.Definition(),
+	func(router *kit.Router) {
+		router.Get("/hello", hello)
+	},
 )
 if err != nil {
 	return err
@@ -116,14 +118,13 @@ if err != nil {
 ```
 
 A nil replacement stack selects defaults. A non-nil empty slice selects no shared
-middleware. Resource and route policies remain active. To retain defaults and
-add middleware, obtain `kit.DefaultMiddleware()`, append your middleware, and
-pass that stack. `v8` returns construction errors; `kit.New()` panics if its
+middleware. Group and route policies remain active. To retain defaults and add middleware, call `router.Use(extra)` at the
+start of setup, before registering routes. `v8` returns construction errors; `kit.New()` panics if its
 automatic defaults cannot be constructed.
 
 Advanced constructors remain available in `kit`: `NewRateLimiter`, `NewJWT`,
-`NewCORS`, `Timeout`, `Authenticate`, and `Authorize`. They support custom providers
-and explicit replacement implementations. The beginner path uses environment
+`NewCORS`, `Timeout`, `Authenticate`, and `Authorize`. They accept application functions
+and explicit settings. The beginner path uses environment
 settings and needs none of these initialization blocks.
 
 ## Rate limiting and identity
@@ -148,7 +149,8 @@ connection hijacking are not supported by the default timeout middleware.
 
 Pass `h.Context()` into services and storage operations. Existing context values
 and earlier deadlines are preserved. A callback that ignores cancellation cannot
-be forcibly stopped. Successful committed writes still invalidate their cache.
+be forcibly stopped. After committed writes, invalidate cached reads with
+`context.WithoutCancel(ctx)`; see the [caching guide](resources.md).
 
 HS256 requires a secret of at least 32 bytes. RS256 requires an RSA public key of
 at least 2048 bits. The algorithm and key type are pinned by configuration;

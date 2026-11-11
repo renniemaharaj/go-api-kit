@@ -13,7 +13,6 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/renniemaharaj/go-api-kit/data"
 	"github.com/renniemaharaj/go-api-kit/examples/resources/users"
 	"github.com/renniemaharaj/go-api-kit/kit"
 	"github.com/renniemaharaj/go-api-kit/v8"
@@ -61,7 +60,7 @@ func request(t *testing.T, app http.Handler, method, path, body, token string, s
 	return response
 }
 
-func TestResourcesUseServicesAndRepositoriesAlongsideFrontend(t *testing.T) {
+func TestRoutesAndStorageAlongsideFrontend(t *testing.T) {
 	isolateEnvironment(t)
 	resource, err := users.New(users.User{
 		ID:   "42",
@@ -83,7 +82,9 @@ func TestResourcesUseServicesAndRepositoriesAlongsideFrontend(t *testing.T) {
 		"users/42":   &fstest.MapFile{Data: []byte("must not shadow the resource")},
 	}
 	app, err := v8.NewHandler(frontend,
-		resource.Definition(authenticate, kit.RequireSubject("id")),
+		func(router *kit.Router) {
+			resource.Routes(router, authenticate, kit.RequireSubject("id"))
+		},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -140,7 +141,7 @@ func TestEnvLimiterIsSharedByFilesResourcesAndMissingRoutes(t *testing.T) {
 	frontend := fstest.MapFS{
 		"index.html": &fstest.MapFile{Data: []byte("frontend")},
 	}
-	app, err := v8.NewHandler(frontend, resource.Definition())
+	app, err := v8.NewHandler(frontend, func(router *kit.Router) { resource.Routes(router) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +152,7 @@ func TestEnvLimiterIsSharedByFilesResourcesAndMissingRoutes(t *testing.T) {
 	request(t, app, http.MethodGet, "/users/42?view=full", "", "", http.StatusTooManyRequests)
 }
 
-func TestV8ReturnsConfigurationAndDefinitionErrors(t *testing.T) {
+func TestV8ReturnsConfigurationAndRouteErrors(t *testing.T) {
 	isolateEnvironment(t)
 	resource, err := users.New()
 	if err != nil {
@@ -162,30 +163,19 @@ func TestV8ReturnsConfigurationAndDefinitionErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := v8.NewHandler(nil, resource.Definition()); err == nil {
+	if _, err := v8.NewHandler(nil, func(router *kit.Router) { resource.Routes(router) }); err == nil {
 		t.Fatal("invalid environment settings were accepted")
 	}
 
 	stack := []kit.Middleware{kit.Timeout(time.Second)}
-	if _, err := v8.NewHandlerWithMiddleware(nil, stack, resource.Definition()); err != nil {
+	if _, err := v8.NewHandlerWithMiddleware(nil, stack, func(router *kit.Router) { resource.Routes(router) }); err != nil {
 		t.Fatalf("explicit middleware must replace the default stack: %v", err)
 	}
 
-	if _, err := v8.NewHandler(nil); err == nil {
-		t.Fatal("an application without files or resources was accepted")
-	}
-
-	conflict := data.Definition{
-		Name: "conflict",
-		Routes: []data.Route{
-			{
-				Method: http.MethodGet,
-				Path:   "/*",
-				Handler: func(h kit.Handle) {
-					h.NoContent()
-				},
-			},
-		},
+	conflict := func(router *kit.Router) {
+		router.Get("/*", func(h kit.Handle) {
+			h.NoContent()
+		})
 	}
 	if _, err := v8.NewHandlerWithMiddleware(fstest.MapFS{}, stack, conflict); err == nil {
 		t.Fatal("a resource conflicting with the frontend route was accepted")
@@ -207,7 +197,7 @@ func TestRunSupportsAnAPIWithoutAFrontendDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = v8.Run(resource.Definition())
+	err = v8.Run(func(router *kit.Router) { resource.Routes(router) })
 	var listenError *net.OpError
 	if !errors.As(err, &listenError) || listenError.Op != "listen" {
 		t.Fatalf("API-only startup did not reach the listener: %v", err)
@@ -260,6 +250,22 @@ func TestFrontendPreservesKitFileResponses(t *testing.T) {
 		app.ServeHTTP(response, request)
 		if response.Code != test.status || response.Body.String() != test.body {
 			t.Fatalf("%s %v: got %d %q", test.method, test.header, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestFailedSetupReturnsNoHandler(t *testing.T) {
+	for _, setup := range []func(*kit.Router){
+		nil,
+		func(router *kit.Router) {
+			router.Get("/valid", func(h kit.Handle) { h.NoContent() })
+			router.Get("/{invalid", func(h kit.Handle) { h.NoContent() })
+		},
+		func(router *kit.Router) { router.Use(nil) },
+	} {
+		app, err := v8.NewHandlerWithMiddleware(nil, []kit.Middleware{}, setup)
+		if app != nil || err == nil {
+			t.Fatalf("failed setup exposed a partial application: %v, %v", app, err)
 		}
 	}
 }

@@ -13,7 +13,7 @@ import (
 	"github.com/renniemaharaj/go-api-kit/kit"
 )
 
-func TestRequestContextReachesAuthHooksAndRepository(t *testing.T) {
+func TestRequestContextReachesAuthAndLoader(t *testing.T) {
 	type requestKey struct{}
 	ctx, cancel := context.WithTimeout(context.WithValue(context.Background(), requestKey{}, "request-value"), time.Second)
 	defer cancel()
@@ -27,24 +27,16 @@ func TestRequestContextReachesAuthHooksAndRepository(t *testing.T) {
 		}
 	}
 
-	users, err := data.NewResource(data.ResourceConfig[string, string]{
-		Name: "users",
-		Load: func(ctx context.Context, id string) (string, error) {
-			check(ctx)
+	users, err := data.NewCache(func(ctx context.Context, id string) (string, error) {
+		check(ctx)
 
-			principal, ok := kit.PrincipalFromContext(ctx)
-			if !ok || principal.ID != "42" {
-				t.Error("repository did not receive verified identity")
-			}
+		principal, ok := kit.PrincipalFromContext(ctx)
+		if !ok || principal.ID != "42" {
+			t.Error("repository did not receive verified identity")
+		}
 
-			return "Ada", nil
-		},
-		BeforeGet: func(ctx context.Context, id string) error {
-			check(ctx)
-			return nil
-		},
-		Cache: data.CachePolicy{TTL: time.Minute},
-	})
+		return "Ada", nil
+	}, data.CacheConfig[string]{TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,23 +89,19 @@ func TestTimeoutCancelsRepositoryAndRejectsLateWrites(t *testing.T) {
 		}
 	})
 
-	users, err := data.NewResource(data.ResourceConfig[string, string]{
-		Name: "users",
-		Load: func(ctx context.Context, id string) (string, error) {
-			<-ctx.Done()
-			observed <- ctx.Err()
-			<-release
+	users, err := data.NewCache(func(ctx context.Context, id string) (string, error) {
+		<-ctx.Done()
+		observed <- ctx.Err()
+		<-release
 
-			return "late", nil
-		},
-		Cache: data.CachePolicy{TTL: time.Minute},
-	})
+		return "late", nil
+	}, data.CacheConfig[string]{TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	lateWrite := make(chan error, 1)
-	handler := kit.Timeout(20 * time.Millisecond)(kit.NewHandler(func(h kit.Handle) {
+	handler := kit.Timeout(20 * time.Millisecond)(kit.HandlerFunc(func(h kit.Handle) {
 		defer close(done)
 		_, err := users.Get(h.Context(), "42")
 		if !errors.Is(err, context.DeadlineExceeded) {

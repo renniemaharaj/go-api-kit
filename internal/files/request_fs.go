@@ -20,12 +20,12 @@ func (f requestFileSystem) Open(name string) (fs.File, error) {
 	}
 
 	if !f.store.cacheEnabled {
-		return f.store.repository.open(f.ctx, name)
+		return f.store.open(f.ctx, name)
 	}
 
 	snapshot, err := f.store.files.Get(f.ctx, name)
 	if errors.Is(err, errStreamFile) {
-		return f.store.repository.open(f.ctx, name)
+		return f.store.open(f.ctx, name)
 	}
 
 	if err != nil {

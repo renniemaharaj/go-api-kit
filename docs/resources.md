@@ -1,351 +1,112 @@
-# Resources, repositories, and caching
+# Routes, storage, and caching
 
-Import the public package:
-
-```go
-import "github.com/renniemaharaj/go-api-kit/data"
-```
-
-The `data` package connects an application's repository to service rules and an
-optional cache. It works independently of HTTP, so the same resource can serve
-handlers, background jobs, and tests.
-
-## Resource packages
-
-Give each resource its own Go package. Its package name supplies the context,
-so files and private constructors do not need a repeated resource prefix:
-
-```text
-users/
-  resource.go    Model, construction, HTTP definition, and error declarations
-  repository.go  Storage implementation and newRepository
-  service.go     Use cases, validation, and repository operations
-  handler.go     Request handling and route metadata
-```
-
-See the complete [users package](../examples/resources/users/). Its public
-`New` constructor creates the repository, its cache, the service, and the
-resource together. Handlers call the service; the service uses the repository.
-The cache sits below the service, so cached reads still run service logic.
-Applications do not wire individual repository methods or handlers.
-
-The built-in [health resource](../v8/) shows the same layers with
-narrow interfaces instead of CRUD storage. Its handler consumes `Service.Check`,
-and its service consumes `Repository.Read`. The repository retains an immutable
-startup snapshot; the service turns that snapshot into uptime and status.
-`resource.go` constructs and connects these implementations. Tests substitute
-the interfaces to exercise storage failures, cancellation, and HTTP 503 responses.
-
-v8 registers GET and HEAD at `/health` automatically alongside application
-resources and frontend files. These routes use the shared middleware and are
-reserved. GET returns JSON status and uptime in seconds; HEAD omits the body.
-Responses are not cached. This checks process liveness, not database readiness.
-
-## Describe routes beside the handlers
-
-In [handler.go](../examples/resources/users/handler.go), declare the method,
-resource-relative path, handler, and any endpoint-specific middleware:
+Register endpoints directly with `kit.Router`. An endpoint can call a function,
+a concrete application type, or a database driver. The toolkit imposes no
+handler/service/repository layout.
 
 ```go
-func (h handler) Routes() []data.Route {
-	return []data.Route{
-		{
-			Method:  http.MethodGet,
-			Path:    "/{id}",
-			Handler: h.Get,
-		},
-		{
-			Method:     http.MethodDelete,
-			Path:       "/{id}",
-			Handler:    h.Delete,
-			Middleware: []kit.Middleware{kit.RequireAnyRole("editor")},
-		},
-	}
-}
+return v8.Run(func(router *kit.Router) {
+	router.Get("/hello", func(h kit.Handle) {
+		h.Text(http.StatusOK, "Hello, world!")
+	})
+})
 ```
 
-The handler holds the service and translates HTTP input and output:
+Grouping and access policies are optional:
 
 ```go
-type handler struct {
-	service *service
-}
+router.Route("/users", func(users *kit.Router) {
+	users.With(kit.RequireSubject("id")).Get("/{id}", showUser)
+})
 ```
 
-Its methods call `h.service.Get`, `Save`, or `Delete`. Validation and business
-operations belong in the service. The resource describes its shared prefix and
-access policies:
+Global middleware runs first. Group and endpoint middleware added with `With`
+run after matching path parameters, in declaration order. A cached read still
+passes through authentication and authorization on every HTTP request. Keep
+business checks that must run on every read outside the cached loading function.
+
+Use `router.Handle(method, path, httpHandler)` for a standard `http.Handler`.
+`kit.HandlerFunc(fn)` implements `http.Handler` directly for other routers or servers.
+`v8.Run(setup...)` adds health and optional frontend files; `kit.Run(build)`
+remains available when you want to provide the entire application handler.
+
+## Optional loading-function cache
+
+`data` has no dependency on HTTP. Wrap any context-aware loading function:
 
 ```go
-func (r *Resource) Definition(with ...kit.Middleware) data.Definition {
-	handlers := handler{service: r.service}
-
-	return data.Definition{
-		Name:       "users",
-		Path:       "/users",
-		Middleware: with,
-		Routes:     handlers.Routes(),
-	}
-}
-```
-
-## Run the resource application with v8
-
-Construct the resource and pass its definition to v8:
-
-```go
-resource, err := users.New()
-if err != nil {
-	return err
-}
-
-return v8.Run(resource.Definition(kit.RequireSubject("id")))
-```
-
-The [runnable example](../examples/resources/main.go) follows this setup. Server
-settings and shared middleware come from `.env` or process variables. There is
-no application configuration file or middleware initialization block.
-
-```dotenv
-SERVER_ADDRESS=localhost:9101
-FRONTEND_DIR=
-REQUEST_TIMEOUT=5s
-CORS_ALLOWED_ORIGINS=http://localhost:3000
-```
-
-An empty `FRONTEND_DIR` serves only resources. Set it to `dist` to serve frontend
-files on the same listener. Resource paths take priority over the file fallback,
-and one shared limiter covers both kinds of requests.
-
-Inside [`v8`](../v8/), `resource.go` connects the health handler, service, and
-read-only snapshot repository. It also composes application routes and delegates
-frontend requests to `kit.NewFileServerFromEnv`. `v8.Run` delegates startup to
-`kit.Run`; kit handles environment defaults and the frontend root's lifetime.
-Application code does not construct or load settings. Kit and the private file
-engine own file access, caching headers, conditional requests, ranges, and HEAD
-responses.
-
-Use `v8.NewHandler(fsys, definitions...)` for tests or an existing HTTP server.
-Pass a nil filesystem for an API-only application. For direct router control:
-
-```go
-engine, err := data.NewEngine(kit.New(),
-	resource.Definition(kit.RequireSubject("id")),
-)
-if err != nil {
-	return err
-}
-```
-
-Kit installs environment-driven defaults. Pass an explicit middleware stack to
-`kit.New(customMiddleware)` or `v8.NewHandlerWithMiddleware` to replace them.
-
-`Engine` implements `http.Handler`, so use it as the server's `Handler`. Add more
-resource definitions to the same constructor to register the rest of the app.
-Each `Definition.Path` prefixes its routes: `/users` and `/{id}` become
-`/users/{id}`. An empty route path matches the resource prefix itself; `/` adds a
-trailing slash. `Router.Use` returns the same router, allowing chained setup.
-
-Middleware executes in this order:
-
-1. Router defaults or their replacement stack, followed by additions from `Use`.
-2. Shared middleware from the resource definition.
-3. Middleware declared on the matched route.
-4. The handler.
-
-Resource and route middleware run after path parameters are matched, so subject
-checks work without manual `router.With` calls. Policies are additive: a route
-cannot remove a resource policy. Keep public and private endpoints in separate
-definitions, or apply access checks only to the private routes.
-
-The engine validates all supplied definitions before registering them. Missing
-handlers, nil middleware, invalid methods or patterns, and conflicting routes
-return startup errors. This validation covers the supplied definitions; routes
-registered manually on the supplied router remain under that router's control.
-The definitions are read at construction and are not a runtime routing registry.
-
-## Define storage explicitly
-
-The [repository](../examples/resources/users/repository.go) implements:
-
-```go
-type Repository[T any, ID comparable] interface {
-	Get(context.Context, ID) (T, error)
-	Save(context.Context, T) (T, error)
-	Delete(context.Context, ID) error
-}
-
-var _ data.Repository[User, string] = (*repository)(nil)
-```
-
-`newRepository` creates the in-memory implementation in the example. Replace it
-with database storage behind the same interface. The resource constructor
-loads cache settings and injects the cached repository into the service:
-
-```go
-records, err := data.NewResourceFromEnv(data.ResourceConfig[User, string]{
-	Name:       "users",
-	Repository: storage,
-	Key:        key,
+users, err := data.NewCache(findUser, data.CacheConfig[User]{
+	TTL:        time.Minute,
+	MaxEntries: 256,
 })
 if err != nil {
 	return err
 }
+
+user, err := users.Get(ctx, "42")
 ```
 
-`User` is the model and `string` is its ID type. `key` extracts the ID. The
-constructor retains `records` for cache invalidation and creates
-`newService(records.Repository())`. This repository keeps caching and automatic
-write invalidation intact.
+The loading function has signature `func(context.Context, ID) (T, error)`. It can
+load a record, calculate a report, or fetch a remote result. There are no required
+write operations, key extraction functions, resource names, or interfaces.
+Pass a concrete storage method directly when you have one.
 
-The example `Resource.Get`, `Save`, and `Delete` delegate to the service for
-non-HTTP callers too. `Invalidate` clears cached storage. The model and resource
-assembly live together in `resource.go`.
+Zero TTL disables caching and allocates no entry store. Positive TTL opts in;
+`MaxEntries` defaults to 1024. Negative settings and a nil loader return errors.
+Application data is never implicitly cached from environment settings. The
+advanced example explicitly enables a one-minute cache in its constructor.
 
-Cache settings also live in the environment:
+## Writes and invalidation
 
-```dotenv
-RESOURCE_CACHE_TTL=1m
-RESOURCE_CACHE_MAX_ENTRIES=1024
-USERS_CACHE_MAX_ENTRIES=256
-```
-
-`NewResourceFromEnv` defaults to a one-minute cache with 1024 entries. Resource
-names form uppercase prefixes: `users` uses `USERS_CACHE_TTL` and
-`USERS_CACHE_MAX_ENTRIES`. These override the corresponding `RESOURCE_CACHE_*`
-settings. Set the TTL to `0s` to disable caching. The lower-level `NewResource`
-constructor remains available for explicitly supplied storage policies.
-
-## Service rules and writes
-
-[service.go](../examples/resources/users/service.go) owns validation, context
-checks, and the work performed with repository data. The handler passes input to
-the service; it does not call storage or implement business rules:
+The application owns its storage operations. Validate input, commit the change,
+then invalidate every affected key:
 
 ```go
-func (s *service) Save(ctx context.Context, user User) (User, error) {
-	if err := ctx.Err(); err != nil {
-		return User{}, fmt.Errorf("users: save: %w", err)
-	}
-
-	if user.ID == "" || strings.TrimSpace(user.Name) == "" {
-		return User{}, fmt.Errorf("users: save: %w", errInvalidUser)
-	}
-
-	saved, err := s.repository.Save(ctx, user)
-	if err != nil {
-		return User{}, fmt.Errorf("users: save: %w", err)
-	}
-
-	return saved, nil
-}
-```
-
-Service methods return domain errors. They remain usable by background jobs and
-tests without an HTTP request. The generic `data.Resource` also offers optional
-`BeforeGet`, `BeforeSave`, and `BeforeDelete` hooks for applications using it
-directly. The example keeps its rules in the explicit service instead.
-
-`Save` returns the stored value, including any ID assigned by storage. Return
-success only after the transaction commits. Successful saves invalidate both
-the input ID and returned ID. Successful deletes invalidate the deleted ID.
-Failed writes leave existing cache entries intact. `Key` is required when
-caching saves, including when supplying a `Repository` implementation.
-
-Return `data.ErrUnsupported` from repository methods that are not supported.
-Return or wrap `data.ErrNotFound` from storage when a record is absent.
-Service and resource errors preserve `errors.Is` and `errors.As` behavior.
-Declare HTTP responses once in the resource definition; `kit` handles mapping
-and logging.
-
-## Shared error responses
-
-Declare known domain errors in `Definition.Errors`:
-
-```go
-Errors: kit.ErrorConfig{
-	Rules: []kit.ErrorRule{
-		{
-			Error:   data.ErrNotFound,
-			Status:  http.StatusNotFound,
-			Message: "user not found",
-		},
-		{
-			Error:   errInvalidUser,
-			Status:  http.StatusBadRequest,
-			Message: errInvalidUser.Error(),
-		},
-	},
-	InternalMessage: "could not complete user operation",
-},
-```
-
-The engine binds this configuration to the resource's handlers. Each handler
-uses the same kit operation:
-
-```go
-user, err := h.service.Get(request.Context(), request.Param("id"))
+saved, err := storage.Save(ctx, user)
 if err != nil {
-	request.Error.Handle(err)
-	return
+	return User{}, err
 }
+
+if err := users.Invalidate(context.WithoutCancel(ctx), user.ID, saved.ID); err != nil {
+	return User{}, err
+}
+
+return saved, nil
 ```
 
-`kit` matches wrapped errors with `errors.Is` in rule order. Responses contain
-only the declared message, or the standard status text when it is empty.
-Unmatched errors return HTTP 500 with `InternalMessage`, defaulting to
-`Internal Server Error`. Server failures are logged; their original details
-stay out of responses. Passing a nil error leaves the response untouched.
-The engine rejects nil rule targets and statuses outside 400-599 at startup.
+Capture the original ID before storage runs if storage may mutate a pointer or
+assign a new ID. Invalidate both the original and returned IDs. Failed writes
+leave the cache intact. After a successful delete, invalidate the deleted ID.
+For custom business operations, invalidate all dependent keys. For external
+writes, deliver invalidation to each application process or wait for expiration.
 
-For a handler outside the resource engine, call
-`handler.WithErrors(config)` once and pass the returned handler to
-`kit.NewHandler`. The error configuration is copied when handlers are bound.
+Use `context.WithoutCancel(ctx)` after commit: the request deadline must not skip
+cache invalidation for data already changed. It preserves scope values while
+removing cancellation. Scope functions used here should resolve stable context
+values locally. Handle scope resolution errors; do not report success with stale
+cached data. The [users example](../examples/resources/users/users.go) holds its
+storage lock through invalidation and demonstrates this sequence for writes.
 
-## Explicit cache invalidation
+`Invalidate(ctx, ids...)` removes keys in the current scope. An empty ID list
+changes nothing. `InvalidateAll(ctx)` clears the current scope. Without a scope
+function it clears this cache instance. Both honor context cancellation; with
+caching disabled they perform no cache changes.
 
-You can remove one entry, several entries, or every entry in the current scope:
+Invalidation fences loads already in flight: those loads may return their older
+result to their existing caller, but cannot put that result back into the cache.
+The cache does not provide storage transactions or cancel existing reads.
 
-```go
-if err := users.Invalidate(ctx, "42"); err != nil {
-	return err
-}
+## Cache ownership and scopes
 
-if err := users.Invalidate(ctx, "42", "57"); err != nil {
-	return err
-}
+- Entries are local to each cache instance in each process.
+- Only successful, uncanceled loads are cached; errors and missing values retry.
+- TTL expires entries, and bounded LRU eviction limits retained entries.
+- Concurrent misses can load independently; requests are not coalesced.
+- Contexts, deadlines, and values reach the loader unchanged.
+- Loading, scope, and clone callbacks must be safe for concurrent calls.
 
-if err := users.InvalidateAll(ctx); err != nil {
-	return err
-}
-```
-
-Invalidation removes cached data without reading or changing storage. The next
-`Get` loads fresh data. An empty ID list is a no-op. With caching disabled,
-invalidation is also a no-op, unless the context is already canceled.
-
-Call invalidation after a successful commit when another code path changes
-storage. It is also how you connect custom writes to affected cached reads.
-For example, if a team update changes a cached user summary, invalidate that
-user explicitly. The library cannot infer dependencies between resources.
-
-Reads already in progress may still return the data they loaded. Invalidation
-prevents those reads from putting their older results back into the cache.
-It does not cancel reads or provide transactional consistency with storage.
-
-## Cache behavior and ownership
-
-- A positive `TTL` enables caching. Zero disables it.
-- The cache is local to each resource instance in each process.
-- `MaxEntries` defaults to 1024 and applies across all scopes in that instance.
-- Least recently used entries are evicted when the cache reaches capacity.
-- Only successful reads are cached. Errors and missing records are retried.
-- Successful saves and deletes invalidate affected IDs without preloading them.
-- Concurrent misses may each call storage. Requests are not coalesced.
-- External changes require explicit invalidation or waiting for expiration.
-
-Treat cached values as immutable. For pointers, maps, slices, or structs
-containing them, provide a deep-copy function if the values may be modified:
+Treat cached values as immutable. Supply a deep copy for pointers, slices, maps,
+or structs containing mutable fields:
 
 ```go
 Clone: func(user User) User {
@@ -354,15 +115,12 @@ Clone: func(user User) User {
 },
 ```
 
-`Clone` copies values into the cache and copies them again on cache hits. On a
-miss, the caller receives the storage result. Storage must return a value that
-the caller can safely own, and it must not mutate it while it is being cloned.
-Callbacks, hooks, scope functions, and clone functions must be concurrency-safe.
+Values are cloned when entering the cache and on cache hits. On misses, the
+caller receives the storage result; storage must allow the caller to own it and
+must not mutate it while cloning occurs.
 
-## Separating tenants or caller-dependent data
-
-By default, IDs share a cache within the resource. If the same ID can return
-different data for different tenants or callers, supply a scope:
+When a key can produce different values for different callers or tenants, include
+every relevant attribute in `Scope`:
 
 ```go
 Scope: func(ctx context.Context) (string, error) {
@@ -375,66 +133,46 @@ Scope: func(ctx context.Context) (string, error) {
 },
 ```
 
-The cache key combines scope and ID. `Invalidate` and `InvalidateAll` affect only
-the scope resolved from their context. Without a scope function,
-`InvalidateAll` clears the resource's entire cache. The scope must include every
-caller attribute that changes the storage result, and remain stable throughout
-an operation. Storage still needs to enforce its own tenant boundaries.
+Scope is resolved for reads and invalidation, including when caching is disabled.
+Errors fail the operation before storage is called. Keys combine scope and ID;
+capacity is shared across scopes. Storage must still enforce tenant boundaries.
+Keep the scope stable throughout an operation and preserve it after commit.
 
-Each application process owns its cache. An invalidation in one process does not
-reach another process; applications with several instances need to deliver
-invalidation events to each instance or use an appropriate expiration policy.
+## HTTP errors
 
-## Extending the service
-
-Add business operations to `service.go`. They can load repository data, change
-it, and save through the same validated operations:
+A handler can write errors directly with `h.Error.BadRequest`, `NotFound`, or
+`Internal`, or bind reusable domain mappings once during route setup:
 
 ```go
-func (s *service) Rename(ctx context.Context, id, name string) (User, error) {
-	user, err := s.Get(ctx, id)
-	if err != nil {
-		return User{}, err
-	}
-
-	user.Name = name
-	return s.Save(ctx, user)
-}
-```
-
-`records.Repository()` preserves caching and automatic write invalidation. It
-bypasses the generic resource's hooks, so the service owns its validation and
-access rules. The example constructor injects this repository once; HTTP
-handlers always use the service.
-
-## Storage callbacks
-
-For a small adapter, `ResourceConfig` also accepts named `Load`, `Save`, and
-`Delete` functions instead of `Repository`. The constructor rejects mixing these
-forms. `Load` is required; omitted writes return `data.ErrUnsupported`.
-
-```go
-users, err := data.NewResource(data.ResourceConfig[User, string]{
-	Name:   "users",
-	Key:    userKey,
-	Load:   findUserByID,
-	Save:   saveUser,
-	Delete: deleteUser,
+handler, err := kit.HandlerFunc(showUser).WithErrors(kit.ErrorConfig{
+	Rules: []kit.ErrorRule{
+		{Error: errNotFound, Status: http.StatusNotFound, Message: "user not found"},
+	},
+	InternalMessage: "could not complete user operation",
 })
 if err != nil {
 	return err
 }
+
+router.Get("/users/{id}", handler)
 ```
 
-## HTTP example
+Handlers call `h.Error.Handle(err)`. Rules match wrapped errors with `errors.Is`
+in order. Empty messages use standard status text. Unmatched errors return HTTP
+500 with the configured fallback. Server errors are logged without exposing
+private details. Nil errors leave the response untouched. Binding validates rule
+targets and status codes and copies the rules.
 
-The runnable example uses an explicit user resource and repository, validation,
-caching, JWT authentication, subject checks, CORS, a shared IP limiter, and request
-deadlines.
-It accepts CORS requests from `http://localhost:3000`.
+## Advanced example
 
-In one terminal, generate a signing secret, print a development JWT for user 42,
-and start the server:
+[users.go](../examples/resources/users/users.go) combines synchronized in-memory
+storage, validation, and optional caching in one concrete type. Its embedded cache
+supplies reads and invalidation. [handler.go](../examples/resources/users/handler.go)
+registers routes directly and handles HTTP input and output. Applications can
+extract business or storage layers when that provides a useful boundary.
+
+The runnable example retains JWT verification, subject policies, CORS, the shared
+IP limiter, and request deadlines. To run it:
 
 ```sh
 cp .env.example .env
@@ -443,21 +181,16 @@ go run ./examples/resources -issue-token 42
 SERVER_ADDRESS=localhost:9101 FRONTEND_DIR= go run ./examples/resources
 ```
 
-In another terminal, set `resource_token` to the printed JWT and call the API:
+Set `resource_token` to the printed token in another terminal:
 
 ```sh
 resource_token='paste-the-issued-token'
 curl -H "Authorization: Bearer $resource_token" http://localhost:9101/users/42
 curl -X PUT http://localhost:9101/users/42 \
   -H "Authorization: Bearer $resource_token" \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"Grace"}'
-curl -H "Authorization: Bearer $resource_token" http://localhost:9101/users/42
+  -H 'Content-Type: application/json' -d '{"name":"Grace"}'
 curl -X DELETE -H "Authorization: Bearer $resource_token" http://localhost:9101/users/42
 ```
 
-The token expires after 15 minutes and cannot access `/users/57`. The issuance
-command is a local development helper; the HTTP API has no token issuance route.
-Applications should obtain tokens from their identity service. See the
-[middleware guide](middleware.md) for verification and IP-binding rules.
-The data store and cache both live in memory and reset on restart.
+The token expires after 15 minutes and cannot access another user's ID. Issuance
+is a local development helper. The example's storage and cache reset on restart.

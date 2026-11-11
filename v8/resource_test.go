@@ -15,7 +15,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/renniemaharaj/go-api-kit/internal/filesystem"
 	"github.com/renniemaharaj/go-api-kit/kit"
 )
 
@@ -71,12 +70,12 @@ func TestDirectoryHandlerServesFrontendFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	root, err := filesystem.OpenRoot(dir)
+	root, err := os.OpenRoot(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer root.Close()
-	handler := testFileHandler(t, root)
+	handler := testFileHandler(t, root.FS())
 
 	for _, test := range []struct {
 		path string
@@ -104,12 +103,12 @@ func TestDirectoryHandlerServesFrontendFiles(t *testing.T) {
 }
 
 func TestDefaultPageServesExternalStylesheetAndIcon(t *testing.T) {
-	root, err := filesystem.OpenRoot(filepath.Join("..", "dist"))
+	root, err := os.OpenRoot(filepath.Join("..", "dist"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer root.Close()
-	handler := testFileHandler(t, root)
+	handler := testFileHandler(t, root.FS())
 
 	page := httptest.NewRecorder()
 	handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/", nil))
@@ -162,12 +161,12 @@ func TestDirectoryHandlerRejectsEscapingSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	root, err := filesystem.OpenRoot(dir)
+	root, err := os.OpenRoot(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer root.Close()
-	handler := testFileHandler(t, root)
+	handler := testFileHandler(t, root.FS())
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/public.txt", nil))
 	if response.Code == http.StatusOK && response.Body.String() == "secret" {

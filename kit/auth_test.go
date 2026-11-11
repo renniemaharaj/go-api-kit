@@ -14,15 +14,11 @@ import (
 
 func TestAuthorizationRunsBeforeCachedReads(t *testing.T) {
 	loads := 0
-	users, err := data.NewResource(data.ResourceConfig[string, string]{
-		Name: "users",
-		Load: func(context.Context, string) (string, error) {
-			loads++
+	users, err := data.NewCache(func(context.Context, string) (string, error) {
+		loads++
 
-			return "private data", nil
-		},
-		Cache: data.CachePolicy{TTL: time.Minute},
-	})
+		return "private data", nil
+	}, data.CacheConfig[string]{TTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}

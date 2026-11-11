@@ -33,7 +33,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if err := v8.Run(resource.Definition(kit.RequireSubject("id"))); err != nil {
+	if err := v8.Run(func(router *kit.Router) {
+		resource.Routes(router, kit.RequireSubject("id"))
+	}); err != nil {
 		log.Fatal(err)
 	}
 }

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/renniemaharaj/go-api-kit/internal/repository"
+	"github.com/renniemaharaj/go-api-kit/data"
 )
 
 // Config bounds cached file contents by entry count and file size.
@@ -22,8 +22,9 @@ type Config struct {
 
 // Store caches immutable file contents and creates a reader per request.
 type Store struct {
-	repository   *fileRepository
-	files        *repository.Cached[fileSnapshot, string]
+	fsys         fs.FS
+	maxFileBytes int64
+	files        *data.Cache[fileSnapshot, string]
 	cacheEnabled bool
 }
 
@@ -48,21 +49,21 @@ func New(fsys fs.FS, config Config) (*Store, error) {
 		config.MaxFileBytes = 1 << 20
 	}
 
-	storage := &fileRepository{
+	store := &Store{
 		fsys:         fsys,
 		maxFileBytes: config.MaxFileBytes,
-	}
-	files := repository.NewCached(storage, repository.CacheConfig[fileSnapshot, string]{
-		TTL:         config.TTL,
-		MaxEntries:  config.MaxEntries,
-		Unsupported: errReadOnly,
-	})
-
-	return &Store{
-		repository:   storage,
-		files:        files,
 		cacheEnabled: config.TTL > 0,
-	}, nil
+	}
+	var err error
+	store.files, err = data.NewCache(store.load, data.CacheConfig[fileSnapshot]{
+		TTL:        config.TTL,
+		MaxEntries: config.MaxEntries,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return store, nil
 }
 
 func (s *Store) FileSystem(ctx context.Context, header http.Header) fs.FS {

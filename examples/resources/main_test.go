@@ -17,7 +17,7 @@ type apiTest struct {
 	t      *testing.T
 	router http.Handler
 	token  string
-	users  *users.Resource
+	users  *users.Users
 }
 
 func newAPITest(t *testing.T, records ...users.User) *apiTest {
@@ -42,7 +42,9 @@ func newAPITest(t *testing.T, records ...users.User) *apiTest {
 	t.Setenv("JWT_REQUIRED_ROLES", "editor")
 	t.Setenv("REQUEST_TIMEOUT", "5s")
 	router, err := v8.NewHandler(nil,
-		resource.Definition(kit.RequireSubject("id")),
+		func(router *kit.Router) {
+			resource.Routes(router, kit.RequireSubject("id"))
+		},
 	)
 	if err != nil {
 		t.Fatal(err)

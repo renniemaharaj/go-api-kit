@@ -4,19 +4,15 @@
   <img src="dist/assets/v8.png" alt="Go API Kit app icon" width="96">
 </p>
 
-Build resource APIs with **handler -> service -> cached repository** wiring.
-`kit` supplies the default request middleware and server runtime. `v8` composes
-application resources and delegates startup to kit. Environment defaults are
-loaded by the engines; application code passes no settings or configuration.
-
-## Start the bundled server
+A small Go HTTP toolkit. Register handlers directly; use storage, business logic,
+and caching when your application needs them.
 
 ```sh
-cp .env.example .env
-go run .
+go get github.com/renniemaharaj/go-api-kit
 ```
 
-The entrypoint stays small:
+Start an application with environment-driven middleware, optional frontend files,
+and a built-in health check:
 
 ```go
 func main() {
@@ -26,22 +22,42 @@ func main() {
 }
 ```
 
-Edit `.env` to change the address, frontend directory, request limits, timeouts,
-caching, CORS, or JWT settings. Process variables override file values.
+Add an endpoint in the same call:
 
-Every v8 application includes `GET /health` and `HEAD /health`. A successful GET
-returns HTTP 200 with `{"status":"ok","uptime_seconds":0}`; uptime increases
-from handler construction. HEAD returns the same status without a body. Health
-responses use `Cache-Control: no-store`.
+```go
+if err := v8.Run(func(router *kit.Router) {
+	router.Get("/hello", func(h kit.Handle) {
+		h.Text(http.StatusOK, "Hello, world!")
+	})
+}); err != nil {
+	log.Fatal(err)
+}
+```
 
-The built-in [health resource](v8/) demonstrates a handler calling a
-service interface, with the service reading a startup snapshot through a
-read-only repository interface. This is process liveness; external dependencies
-are not checked. Service failures return HTTP 503 with status `unavailable`.
-Health uses the shared middleware, including rate limits and JWT authentication
-when enabled. Probes must supply credentials when authentication is configured.
-The GET and HEAD routes at `/health` are reserved; conflicting definitions fail
-at startup.
+See the complete [minimal example](examples/minimal/main.go). Run it with
+`go run ./examples/minimal`. No repository, service interface, or route definition
+is required. Use `Route`, `Group`, and `With` for optional grouping and policies:
+
+```go
+router.Route("/users", func(users *kit.Router) {
+	users.With(kit.RequireSubject("id")).Get("/{id}", showUser)
+})
+```
+
+`*kit.Router` and `kit.HandlerFunc` implement `http.Handler`. Register a standard handler directly with
+`router.Handle(http.MethodGet, "/legacy", legacyHandler)`. Kit handlers expose
+`Request()`, `Writer()`, `Context()`, `DecodeJSON`, JSON, text, HTML, and file helpers.
+
+## Run the bundled frontend
+
+```sh
+cp .env.example .env
+go run .
+```
+
+A missing `.env` is allowed. Process variables override file values. Set
+`FRONTEND_DIR=dist` to serve the bundled page, or leave it empty for an API-only
+application. Explicit routes take priority over frontend files.
 
 ```dotenv
 SERVER_ADDRESS=localhost:9100
@@ -53,97 +69,51 @@ RATE_LIMIT_BURST=40
 CORS_ALLOWED_ORIGINS=http://localhost:3000
 ```
 
-## Add a resource
+`GET /health` returns `{"status":"ok","uptime_seconds":0}` with uptime measured
+from handler construction. `HEAD /health` returns the same status without a body.
+Both use `Cache-Control: no-store`. Health checks process liveness and uses the
+shared middleware, including JWT authentication when configured. GET and HEAD
+at `/health` are reserved; conflicting registrations return startup errors.
 
-Each resource package contains:
-
-```text
-users/
-  resource.go    Model, construction, route and error declarations
-  repository.go  Storage operations
-  service.go     Business rules and repository use
-  handler.go     HTTP input, output, and endpoint declarations
-```
-
-Construct the resource and start it:
-
-```go
-resource, err := users.New(users.User{
-	ID:   "42",
-	Name: "Ada",
-})
-if err != nil {
-	return err
-}
-
-return v8.Run(resource.Definition(kit.RequireSubject("id")))
-```
-
-`v8` registers the declared routes through `data.NewEngine`. It also serves
-frontend files when `FRONTEND_DIR` is set. Leave that variable empty for an
-API-only server. Resource routes take priority over the frontend file fallback.
-
-The [runnable example](examples/resources/main.go) shows the complete flow.
-The [resource guide](docs/resources.md) covers services, validation, errors,
-caching, and resource-specific access rules.
-
-## Default middleware
+## Middleware and HTTP integration
 
 `kit.New()` and `v8` install a shared IP limiter and request deadline. CORS is
-activated by `CORS_ALLOWED_ORIGINS`. JWT verification is activated by a configured
-`JWT_SECRET` or `JWT_PUBLIC_KEY`; `JWT_ENABLED` can explicitly enable or disable it.
-Optional required roles come from `JWT_REQUIRED_ROLES`.
-
-Middleware implementations live in `kit`. Applications do not need to construct
-JWT, CORS, timeout, or rate-limit configuration objects to use the defaults.
+enabled by `CORS_ALLOWED_ORIGINS`; a configured JWT key enables authentication.
+`JWT_REQUIRED_ROLES` adds a shared role policy. Configuration errors fail startup.
+See the [middleware guide](docs/middleware.md) for all settings and overrides.
 
 ```go
-router := kit.New()                 // Environment-driven defaults.
-router.Use(logging)                 // Append middleware.
-custom := kit.New(customMiddleware) // Replace the default stack.
+router := kit.New()                  // Environment-driven defaults.
+router.Use(logging)                 // Append before registering routes.
+custom := kit.New(customMiddleware)  // Replace defaults.
 ```
 
-`v8.NewHandler(fsys, definitions...)` returns the default application handler for
-tests or an existing HTTP server. Pass nil for an API without frontend files.
-`v8.NewHandlerWithMiddleware(fsys, stack, definitions...)` supplies an explicit
-replacement stack. Invalid environment settings return startup errors from `v8`;
-`kit.New()` panics on invalid defaults because its constructor returns one value.
-See the [middleware guide](docs/middleware.md) for environment variables and
-advanced overrides.
+`v8.NewHandler(fsys, setup...)` builds a handler for tests or an existing HTTP
+server. A nil filesystem serves APIs and health only, even without setup.
+`v8.NewHandlerWithMiddleware(fsys, stack, setup...)` accepts a replacement stack;
+a non-nil empty slice disables defaults. Setup functions receive `*kit.Router`.
+Invalid routes, duplicate patterns, nil handlers, and nil middleware panic during
+manual router setup; v8 converts setup panics to errors and returns no handler.
+Register all routes and middleware before serving requests.
 
-## Packages
+## Optional caching and business logic
 
-```text
-go-api-kit/
-  kit/        HTTP runtime, routing, handlers, files, errors, and middleware
-  v8/         Application resources and startup composition
-  data/       Resource definitions, repositories, caching, and HTTP wiring
-  internal/   Private storage, cache, filesystem, and environment implementations
-  examples/   Runnable applications
-  docs/       Resource and middleware guides
-```
+`data.NewCache(load, data.CacheConfig[T]{TTL: time.Minute})` caches a loading
+function. Zero TTL disables caching. The cache supports bounded LRU eviction,
+scopes, cloning mutable values, and explicit invalidation. Applications own
+writes and invalidate affected keys after a successful commit.
 
-The `v8` package uses the same resource layout for its built-in health endpoint.
-`resource.go` connects the handler, service, and repository; `handler.go` handles
-HTTP, `service.go` computes health status, and `repository.go` keeps the startup
-snapshot. Kit owns server defaults and file serving; the private file engine
-owns file access and content caching.
+The [advanced example](examples/resources/) combines concrete user storage,
+validation, caching, JWT subject checks, and HTTP error mapping in two user files.
+The [storage and caching guide](docs/resources.md) explains ownership,
+cancellation-safe invalidation, and tenant separation.
 
-Install and import the public packages directly:
+| Package | Responsibility |
+| --- | --- |
+| `kit` | Router, HTTP helpers, middleware, server runtime, safe file serving |
+| `v8` | Application startup, health, and optional frontend composition |
+| `data` | Optional loading-function cache; independent of HTTP |
+| `internal` | Bounded cache, file contents, and environment parsing |
 
-```sh
-go get github.com/renniemaharaj/go-api-kit
-```
-
-```go
-import (
-	"github.com/renniemaharaj/go-api-kit/data"
-	"github.com/renniemaharaj/go-api-kit/kit"
-	"github.com/renniemaharaj/go-api-kit/v8"
-)
-```
-
-`*kit.Router` and `*data.Engine` implement `http.Handler`. Handler conveniences
-include `JSON`, `UnmarshalJSON`, `Text`, `HTML`, `NoContent`, `File`, and `StaticFS`.
-Use `h.Error.Handle(err)` for resource-declared error responses and logging.
-`Request()` and `Writer()` expose the standard-library HTTP values.
+See [refactor measurements and migration notes](docs/simplification.md) for the
+breaking changes and the size of the simplification.

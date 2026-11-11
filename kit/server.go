@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/renniemaharaj/go-api-kit/internal/environment"
-	"github.com/renniemaharaj/go-api-kit/internal/filesystem"
 )
 
 // Run builds and serves an application using environment-driven defaults.
@@ -25,13 +25,13 @@ func Run(build func(fs.FS) (http.Handler, error)) error {
 
 	var fsys fs.FS
 	if directory := values.String("FRONTEND_DIR", ""); directory != "" {
-		root, err := filesystem.OpenRoot(directory)
+		root, err := os.OpenRoot(directory)
 		if err != nil {
 			return err
 		}
 		defer root.Close()
 
-		fsys = root
+		fsys = root.FS()
 	}
 
 	handler, err := build(fsys)

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 )
 
 // JSON marshals value and writes it as a JSON response. It marshals before
@@ -23,8 +22,9 @@ func (h Handle) JSON(code int, value any) error {
 	return err
 }
 
-// unmarshalJSON decodes exactly one JSON value from the request body into v.
-func unmarshalJSON(r *http.Request, v any) error {
+// DecodeJSON decodes exactly one JSON value from the request body.
+func (h Handle) DecodeJSON(v any) error {
+	r := h.r
 	if r.Body == nil {
 		return errors.New("request body is empty")
 	}

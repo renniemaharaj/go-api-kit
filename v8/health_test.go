@@ -4,27 +4,20 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"testing/fstest"
 
-	"github.com/renniemaharaj/go-api-kit/data"
 	"github.com/renniemaharaj/go-api-kit/kit"
 	"github.com/renniemaharaj/go-api-kit/v8"
 )
 
 func TestHealthIsBuiltInAlongsideResourcesAndFrontend(t *testing.T) {
 	isolateEnvironment(t)
-	resource := data.Definition{
-		Name: "ping",
-		Path: "/ping",
-		Routes: []data.Route{
-			{
-				Method: http.MethodGet,
-				Handler: func(h kit.Handle) {
-					h.NoContent()
-				},
-			},
-		},
+	resource := func(router *kit.Router) {
+		router.Get("/ping", func(h kit.Handle) {
+			h.NoContent()
+		})
 	}
 	frontend := fstest.MapFS{
 		"health": &fstest.MapFile{Data: []byte("must not shadow health")},
@@ -94,21 +87,48 @@ func TestHealthUsesSharedAuthentication(t *testing.T) {
 
 func TestHealthRouteConflictsReturnStartupErrors(t *testing.T) {
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
-		conflict := data.Definition{
-			Name: "conflict",
-			Path: "/health",
-			Routes: []data.Route{
-				{
-					Method: method,
-					Handler: func(h kit.Handle) {
-						h.NoContent()
-					},
-				},
-			},
+		conflict := func(router *kit.Router) {
+			router.Method(method, "/health", func(h kit.Handle) {
+				h.NoContent()
+			})
 		}
 
 		if _, err := v8.NewHandlerWithMiddleware(nil, []kit.Middleware{}, conflict); err == nil {
 			t.Fatalf("conflicting %s /health route was accepted", method)
+		}
+	}
+}
+
+func TestHealthOnlyApplicationNeedsNoSetup(t *testing.T) {
+	isolateEnvironment(t)
+	app, err := v8.NewHandler(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	request(t, app, http.MethodGet, "/health", "", "", http.StatusOK)
+	request(t, app, http.MethodGet, "/missing", "", "", http.StatusNotFound)
+}
+
+func TestSetupCanAppendGlobalMiddleware(t *testing.T) {
+	app, err := v8.NewHandlerWithMiddleware(nil, []kit.Middleware{}, func(router *kit.Router) {
+		router.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("X-Global", "yes")
+				next.ServeHTTP(w, r)
+			})
+		})
+		router.Get("/ping", func(h kit.Handle) { h.NoContent() })
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{"/health", "/ping", "/missing"} {
+		response := httptest.NewRecorder()
+		app.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Header().Get("X-Global") != "yes" {
+			t.Fatalf("global middleware did not cover %s", path)
 		}
 	}
 }

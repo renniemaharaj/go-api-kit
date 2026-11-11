@@ -143,3 +143,66 @@ func request(t *testing.T, handler http.Handler, method, target, body string) *h
 	handler.ServeHTTP(response, httptest.NewRequest(method, target, strings.NewReader(body)))
 	return response
 }
+
+func TestDirectHandlersAndNestedPoliciesRunInOrder(t *testing.T) {
+	var steps []string
+	record := func(name string) kit.Middleware {
+		return func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				steps = append(steps, name)
+				next.ServeHTTP(w, r)
+			})
+		}
+	}
+
+	router := kit.New(record("global"))
+	router.Route("/users", func(users *kit.Router) {
+		users.With(record("group")).With(record("route")).Handle("GET", "/{id}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			steps = append(steps, r.PathValue("id"))
+			w.WriteHeader(http.StatusNoContent)
+		}))
+	})
+
+	response := request(t, router, "GET", "/users/42", "")
+	if response.Code != http.StatusNoContent || strings.Join(steps, ",") != "global,group,route,42" {
+		t.Fatalf("got %d, order %v", response.Code, steps)
+	}
+}
+
+func TestRouterRejectsInvalidAndConflictingRegistration(t *testing.T) {
+	handle := func(h kit.Handle) { h.NoContent() }
+	for _, test := range []struct {
+		name  string
+		setup func(*kit.Router)
+	}{
+		{name: "nil handler", setup: func(r *kit.Router) { r.Get("/invalid", nil) }},
+		{name: "nil http handler", setup: func(r *kit.Router) { r.Handle("GET", "/invalid", nil) }},
+		{name: "nil middleware", setup: func(r *kit.Router) { r.With(nil) }},
+		{name: "nil global middleware", setup: func(r *kit.Router) { r.Use(nil) }},
+		{name: "method", setup: func(r *kit.Router) { r.Method("INVALID", "/invalid", handle) }},
+		{name: "relative path", setup: func(r *kit.Router) { r.Get("invalid", handle) }},
+		{name: "pattern", setup: func(r *kit.Router) { r.Get("/{id", handle) }},
+		{name: "regex", setup: func(r *kit.Router) { r.Get("/{id:[}", handle) }},
+		{name: "duplicate", setup: func(r *kit.Router) {
+			r.Get("/users/{id}", handle)
+			r.With().Get("/users/{name}", handle)
+		}},
+		{name: "nested duplicate", setup: func(r *kit.Router) {
+			r.Get("/api/users/{id}", handle)
+			r.Route("/api/", func(api *kit.Router) {
+				api.Group(func(group *kit.Router) {
+					group.Get("/users/{name}", handle)
+				})
+			})
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("invalid setup was accepted")
+				}
+			}()
+			test.setup(kit.New([]kit.Middleware{}...))
+		})
+	}
+}

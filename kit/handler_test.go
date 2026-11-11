@@ -10,14 +10,14 @@ import (
 	"github.com/renniemaharaj/go-api-kit/kit"
 )
 
-func TestHandleUnmarshalJSONDecodesRequestBody(t *testing.T) {
+func TestHandleDecodeJSONDecodesRequestBody(t *testing.T) {
 	type input struct {
 		Name string `json:"name"`
 	}
 
-	handler := kit.NewHandler(func(h kit.Handle) {
+	handler := kit.HandlerFunc(func(h kit.Handle) {
 		var body input
-		if err := h.UnmarshalJSON(&body); err != nil {
+		if err := h.DecodeJSON(&body); err != nil {
 			h.Error.Internal(err.Error())
 			return
 		}
@@ -35,7 +35,7 @@ func TestHandleJSONWritesEncodedResponse(t *testing.T) {
 	type output struct {
 		ID int `json:"id"`
 	}
-	handler := kit.NewHandler(func(h kit.Handle) {
+	handler := kit.HandlerFunc(func(h kit.Handle) {
 		if err := h.JSON(http.StatusCreated, output{ID: 42}); err != nil {
 			h.Error.Internal(err.Error())
 		}
@@ -60,10 +60,10 @@ func TestHandleJSONWritesEncodedResponse(t *testing.T) {
 	}
 }
 
-func TestHandleUnmarshalJSONRejectsMultipleValues(t *testing.T) {
-	handler := kit.NewHandler(func(h kit.Handle) {
+func TestHandleDecodeJSONRejectsMultipleValues(t *testing.T) {
+	handler := kit.HandlerFunc(func(h kit.Handle) {
 		var value any
-		if err := h.UnmarshalJSON(&value); err == nil {
+		if err := h.DecodeJSON(&value); err == nil {
 			h.Error.Internal("expected decode error")
 			return
 		}
@@ -131,7 +131,7 @@ func TestHandleResponseHelpers(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			response := request(t, kit.NewHandler(test.handle), http.MethodGet, "/", "")
+			response := request(t, kit.HandlerFunc(test.handle), http.MethodGet, "/", "")
 			if response.Code != test.wantStatus {
 				t.Fatalf("got status %d, want %d", response.Code, test.wantStatus)
 			}
@@ -203,7 +203,7 @@ func TestHandleErrorResponses(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			response := request(t, kit.NewHandler(func(h kit.Handle) {
+			response := request(t, kit.HandlerFunc(func(h kit.Handle) {
 				test.write(h.Error)
 			}), http.MethodGet, "/", "")
 			if response.Code != test.wantStatus || response.Body.String() != "problem\n" {
@@ -213,13 +213,8 @@ func TestHandleErrorResponses(t *testing.T) {
 	}
 }
 
-func TestHandleHeadersAndCookies(t *testing.T) {
-	handler := kit.NewHandler(func(h kit.Handle) {
-		h.Header.Set("X-Request-Value", h.Header.Get("X-Request"))
-		h.Header.Add("X-Values", "first")
-		h.Header.Add("X-Values", "second")
-		h.Header.Set("X-Delete", "removed")
-		h.Header.Del("X-Delete")
+func TestHandleCookies(t *testing.T) {
+	handler := kit.HandlerFunc(func(h kit.Handle) {
 
 		cookie, err := h.Cookie("incoming")
 		if err != nil {
@@ -236,7 +231,6 @@ func TestHandleHeadersAndCookies(t *testing.T) {
 	})
 
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
-	request.Header.Set("X-Request", "present")
 	request.AddCookie(&http.Cookie{
 		Name:  "incoming",
 		Value: "cookie-value",
@@ -249,18 +243,6 @@ func TestHandleHeadersAndCookies(t *testing.T) {
 		t.Fatalf("got status %d and body %q", response.Code, response.Body.String())
 	}
 
-	if got := response.Header().Get("X-Request-Value"); got != "present" {
-		t.Fatalf("got X-Request-Value %q", got)
-	}
-
-	if got := response.Header().Values("X-Values"); len(got) != 2 || got[0] != "first" || got[1] != "second" {
-		t.Fatalf("got X-Values %#v", got)
-	}
-
-	if got := response.Header().Get("X-Delete"); got != "" {
-		t.Fatalf("got deleted header %q", got)
-	}
-
 	cookies := response.Result().Cookies()
 	if len(cookies) != 1 || cookies[0].Name != "session" || cookies[0].Value != "abc" {
 		t.Fatalf("got response cookies %#v", cookies)
@@ -268,7 +250,7 @@ func TestHandleHeadersAndCookies(t *testing.T) {
 }
 
 func TestHandleExposesStandardRequestAndWriter(t *testing.T) {
-	handler := kit.NewHandler(func(h kit.Handle) {
+	handler := kit.HandlerFunc(func(h kit.Handle) {
 		if h.Request().Method != http.MethodPatch || h.Path() != "/resource" {
 			h.Error.BadRequest("wrong request")
 			return

@@ -12,11 +12,7 @@ import (
 
 // FileCacheConfig bounds cached file contents by entry count and file size.
 // A positive TTL enables caching; zero streams files directly from storage.
-type FileCacheConfig struct {
-	TTL          time.Duration
-	MaxEntries   int
-	MaxFileBytes int64
-}
+type FileCacheConfig = files.Config
 
 // FileServer serves cached file contents with a separate reader per request.
 // Authentication and rate limiting must wrap this handler, including cache hits.
@@ -25,11 +21,7 @@ type FileServer struct {
 }
 
 func NewFileServer(fsys fs.FS, config FileCacheConfig) (*FileServer, error) {
-	store, err := files.New(fsys, files.Config{
-		TTL:          config.TTL,
-		MaxEntries:   config.MaxEntries,
-		MaxFileBytes: config.MaxFileBytes,
-	})
+	store, err := files.New(fsys, config)
 	if err != nil {
 		return nil, err
 	}

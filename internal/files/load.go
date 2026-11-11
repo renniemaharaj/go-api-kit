@@ -3,24 +3,12 @@ package files
 import (
 	"context"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
-
-	"github.com/renniemaharaj/go-api-kit/internal/repository"
 )
 
-type fileRepository struct {
-	fsys         fs.FS
-	maxFileBytes int64
-}
-
-var errReadOnly = errors.New("file repository is read-only")
-
-var _ repository.Store[fileSnapshot, string] = (*fileRepository)(nil)
-
-func (r *fileRepository) Get(ctx context.Context, name string) (fileSnapshot, error) {
+func (r *Store) load(ctx context.Context, name string) (fileSnapshot, error) {
 	var zero fileSnapshot
 	file, err := r.open(ctx, name)
 	if err != nil {
@@ -57,15 +45,7 @@ func (r *fileRepository) Get(ctx context.Context, name string) (fileSnapshot, er
 	}, nil
 }
 
-func (r *fileRepository) Save(context.Context, fileSnapshot) (fileSnapshot, error) {
-	return fileSnapshot{}, errReadOnly
-}
-
-func (r *fileRepository) Delete(context.Context, string) error {
-	return errReadOnly
-}
-
-func (r *fileRepository) open(ctx context.Context, name string) (fs.File, error) {
+func (r *Store) open(ctx context.Context, name string) (fs.File, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

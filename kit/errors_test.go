@@ -89,7 +89,7 @@ func TestHandleErrorMapsDomainErrorsAndKeepsServerDetailsPrivate(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			response := request(t, kit.NewHandler(handler), http.MethodGet, "/", "")
+			response := request(t, kit.HandlerFunc(handler), http.MethodGet, "/", "")
 			if response.Code != test.status || response.Body.String() != test.body {
 				t.Fatalf("got %d %q, want %d %q", response.Code, response.Body.String(), test.status, test.body)
 			}
@@ -125,12 +125,12 @@ func TestErrorConfigurationIsCopiedAndUsesDefaultMessages(t *testing.T) {
 	config.Rules[0].Status = http.StatusForbidden
 	config.Rules[0].Message = "changed after construction"
 
-	response := request(t, kit.NewHandler(handler), http.MethodGet, "/", "")
+	response := request(t, kit.HandlerFunc(handler), http.MethodGet, "/", "")
 	if response.Code != http.StatusNotFound || response.Body.String() != "Not Found\n" {
 		t.Fatalf("error configuration changed after binding: %d %q", response.Code, response.Body.String())
 	}
 
-	unconfigured := kit.NewHandler(func(h kit.Handle) {
+	unconfigured := kit.HandlerFunc(func(h kit.Handle) {
 		h.Error.Handle(errors.New("private details"))
 	})
 	response = request(t, unconfigured, http.MethodGet, "/", "")

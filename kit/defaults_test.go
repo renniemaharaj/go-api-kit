@@ -20,7 +20,7 @@ func isolateDefaultEnvironment(t *testing.T) {
 
 	for _, assignment := range os.Environ() {
 		name, _, _ := strings.Cut(assignment, "=")
-		for _, prefix := range []string{"RATE_LIMIT_", "REQUEST_", "JWT_", "CORS_", "FILE_CACHE_", "RESOURCE_CACHE_"} {
+		for _, prefix := range []string{"RATE_LIMIT_", "REQUEST_", "JWT_", "CORS_", "FILE_CACHE_"} {
 			if strings.HasPrefix(name, prefix) {
 				t.Setenv(name, "")
 				if err := os.Unsetenv(name); err != nil {

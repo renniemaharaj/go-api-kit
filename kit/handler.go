@@ -8,7 +8,7 @@ import (
 	"net/url"
 )
 
-// HandlerFunc is a request handler that receives a request-scoped Handle.
+// HandlerFunc is an http.Handler that receives a request-scoped Handle.
 type HandlerFunc func(Handle)
 
 // Handle contains the standard HTTP request and response writer together with
@@ -17,35 +17,16 @@ type Handle struct {
 	w http.ResponseWriter
 	r *http.Request
 
-	Error  ErrorAPI
-	Header HeaderAPI
-
-	// UnmarshalJSON decodes exactly one JSON value from the request body.
-	// It is a function field because Go reserves the method name for
-	// json.Unmarshaler's incompatible UnmarshalJSON([]byte) error signature.
-	UnmarshalJSON func(v any) error
+	Error ErrorAPI
 }
 
-func newHandle(w http.ResponseWriter, r *http.Request) Handle {
-	return Handle{
+// ServeHTTP implements http.Handler directly, without an adapter closure.
+func (fn HandlerFunc) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	fn(Handle{
 		w:     w,
 		r:     r,
 		Error: ErrorAPI{w: w},
-		Header: HeaderAPI{
-			w: w,
-			r: r,
-		},
-		UnmarshalJSON: func(v any) error {
-			return unmarshalJSON(r, v)
-		},
-	}
-}
-
-// NewHandler adapts a kit HandlerFunc to an http.HandlerFunc.
-func NewHandler(fn HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		fn(newHandle(w, r))
-	}
+	})
 }
 
 // Writer returns the underlying response writer.
