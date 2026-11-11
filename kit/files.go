@@ -30,6 +30,7 @@ func (h Handle) StaticFS(fsys fs.FS, path string) {
 		default:
 			h.Error.Internal("Internal Server Error")
 		}
+
 		return
 	}
 	defer file.Close()

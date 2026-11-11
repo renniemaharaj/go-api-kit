@@ -5,6 +5,14 @@ set -eu
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
+echo "pre-commit: checking Go formatting"
+unformatted_files=$(gofmt -l .)
+if [ -n "$unformatted_files" ]; then
+  printf '%s\n' "$unformatted_files"
+  echo "Run gofmt on these files before committing."
+  exit 1
+fi
+
 echo "pre-commit: running tests"
 go test ./...
 

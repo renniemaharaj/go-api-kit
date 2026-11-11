@@ -13,7 +13,9 @@ func TestStaticFS(t *testing.T) {
 	fsys := fstest.MapFS{
 		"index.html": &fstest.MapFile{Data: []byte("home")},
 	}
-	handler := kit.NewHandler(func(h kit.Handle) { h.StaticFS(fsys, "index.html") })
+	handler := kit.NewHandler(func(h kit.Handle) {
+		h.StaticFS(fsys, "index.html")
+	})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
 	if response.Code != http.StatusOK || response.Body.String() != "home" {
@@ -22,7 +24,9 @@ func TestStaticFS(t *testing.T) {
 }
 
 func TestStaticFSRejectsTraversal(t *testing.T) {
-	handler := kit.NewHandler(func(h kit.Handle) { h.StaticFS(fstest.MapFS{}, "../secret.txt") })
+	handler := kit.NewHandler(func(h kit.Handle) {
+		h.StaticFS(fstest.MapFS{}, "../secret.txt")
+	})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
 	if response.Code != http.StatusBadRequest {
