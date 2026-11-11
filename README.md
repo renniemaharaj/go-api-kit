@@ -5,9 +5,9 @@
 </p>
 
 Build resource APIs with **handler -> service -> cached repository** wiring.
-`kit` supplies the default request middleware. `v8` reads server settings from the
-environment and starts the application. Application configuration lives in `.env`
-or process variables.
+`kit` supplies the default request middleware and server runtime. `v8` composes
+application resources and delegates startup to kit. Environment defaults are
+loaded by the engines; application code passes no settings or configuration.
 
 ## Start the bundled server
 
@@ -34,7 +34,7 @@ returns HTTP 200 with `{"status":"ok","uptime_seconds":0}`; uptime increases
 from handler construction. HEAD returns the same status without a body. Health
 responses use `Cache-Control: no-store`.
 
-The built-in [health resource](internal/health/) demonstrates a handler calling a
+The built-in [health resource](v8/) demonstrates a handler calling a
 service interface, with the service reading a startup snapshot through a
 read-only repository interface. This is process liveness; external dependencies
 are not checked. Service failures return HTTP 503 with status `unavailable`.
@@ -115,13 +115,19 @@ advanced overrides.
 
 ```text
 go-api-kit/
-  kit/        HTTP routing, handlers, files, errors, and middleware
-  v8/         Environment-driven application startup
+  kit/        HTTP runtime, routing, handlers, files, errors, and middleware
+  v8/         Application resources and startup composition
   data/       Resource definitions, repositories, caching, and HTTP wiring
   internal/   Private storage, cache, filesystem, and environment implementations
   examples/   Runnable applications
   docs/       Resource and middleware guides
 ```
+
+The `v8` package uses the same resource layout for its built-in health endpoint.
+`resource.go` connects the handler, service, and repository; `handler.go` handles
+HTTP, `service.go` computes health status, and `repository.go` keeps the startup
+snapshot. Kit owns server defaults and file serving; the private file engine
+owns file access and content caching.
 
 Install and import the public packages directly:
 

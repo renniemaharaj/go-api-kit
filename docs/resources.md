@@ -29,7 +29,7 @@ resource together. Handlers call the service; the service uses the repository.
 The cache sits below the service, so cached reads still run service logic.
 Applications do not wire individual repository methods or handlers.
 
-The built-in [health resource](../internal/health/) shows the same layers with
+The built-in [health resource](../v8/) shows the same layers with
 narrow interfaces instead of CRUD storage. Its handler consumes `Service.Check`,
 and its service consumes `Repository.Read`. The repository retains an immutable
 startup snapshot; the service turns that snapshot into uptime and status.
@@ -116,6 +116,14 @@ CORS_ALLOWED_ORIGINS=http://localhost:3000
 An empty `FRONTEND_DIR` serves only resources. Set it to `dist` to serve frontend
 files on the same listener. Resource paths take priority over the file fallback,
 and one shared limiter covers both kinds of requests.
+
+Inside [`v8`](../v8/), `resource.go` connects the health handler, service, and
+read-only snapshot repository. It also composes application routes and delegates
+frontend requests to `kit.NewFileServerFromEnv`. `v8.Run` delegates startup to
+`kit.Run`; kit handles environment defaults and the frontend root's lifetime.
+Application code does not construct or load settings. Kit and the private file
+engine own file access, caching headers, conditional requests, ranges, and HEAD
+responses.
 
 Use `v8.NewHandler(fsys, definitions...)` for tests or an existing HTTP server.
 Pass a nil filesystem for an API-only application. For direct router control:

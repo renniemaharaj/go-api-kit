@@ -1,4 +1,4 @@
-// Package v8 serves environment-configured resource applications and frontend files.
+// Package v8 assembles resource applications with a built-in health endpoint.
 package v8
 
 import (
@@ -6,13 +6,27 @@ import (
 	"io/fs"
 	"net/http"
 	"slices"
+	"time"
 
 	"github.com/renniemaharaj/go-api-kit/data"
-	"github.com/renniemaharaj/go-api-kit/internal/environment"
-	"github.com/renniemaharaj/go-api-kit/internal/filesystem"
-	"github.com/renniemaharaj/go-api-kit/internal/health"
 	"github.com/renniemaharaj/go-api-kit/kit"
 )
+
+type Snapshot struct {
+	StartedAt time.Time
+}
+
+type Status struct {
+	Status        string `json:"status"`
+	UptimeSeconds int64  `json:"uptime_seconds"`
+}
+
+// Run starts the application using kit's environment-driven server defaults.
+func Run(resources ...data.Definition) error {
+	return kit.Run(func(fsys fs.FS) (http.Handler, error) {
+		return NewHandler(fsys, resources...)
+	})
+}
 
 // NewHandler wires resources, /health, and optional files with default middleware.
 func NewHandler(fsys fs.FS, resources ...data.Definition) (http.Handler, error) {
@@ -41,9 +55,9 @@ func NewHandlerWithMiddleware(fsys fs.FS, middleware []kit.Middleware, resources
 	}
 
 	resources = slices.Clone(resources)
-	resources = append(resources, health.New())
+	resources = append(resources, newResource())
 	if fsys != nil {
-		frontend, err := frontendDefinition(fsys)
+		frontend, err := newFrontend(fsys)
 		if err != nil {
 			return nil, err
 		}
@@ -54,34 +68,41 @@ func NewHandlerWithMiddleware(fsys fs.FS, middleware []kit.Middleware, resources
 	return data.NewEngine(kit.New(middleware...), resources...)
 }
 
-// Run reads server settings from the environment and starts the application.
-// FRONTEND_DIR is optional when resource definitions are supplied.
-func Run(resources ...data.Definition) error {
-	values, err := environment.Load(".env")
+func newResource() data.Definition {
+	storage := newRepository()
+	checks := &service{repository: storage}
+	handlers := handler{service: checks}
+
+	return data.Definition{
+		Name:   "health",
+		Path:   "/health",
+		Routes: handlers.Routes(),
+	}
+}
+
+func newFrontend(fsys fs.FS) (data.Definition, error) {
+	files, err := kit.NewFileServerFromEnv(fsys)
 	if err != nil {
-		return err
+		return data.Definition{}, err
 	}
 
-	var fsys fs.FS
-	if directory := values.String("FRONTEND_DIR", ""); directory != "" {
-		root, err := filesystem.OpenRoot(directory)
-		if err != nil {
-			return err
-		}
-		defer root.Close()
-
-		fsys = root
+	serve := func(request kit.Handle) {
+		files.ServeHTTP(request.Writer(), request.Request())
 	}
 
-	handler, err := NewHandler(fsys, resources...)
-	if err != nil {
-		return err
-	}
-
-	server, err := newServer(handler, values)
-	if err != nil {
-		return err
-	}
-
-	return server.ListenAndServe()
+	return data.Definition{
+		Name: "frontend",
+		Routes: []data.Route{
+			{
+				Method:  http.MethodGet,
+				Path:    "/*",
+				Handler: serve,
+			},
+			{
+				Method:  http.MethodHead,
+				Path:    "/*",
+				Handler: serve,
+			},
+		},
+	}, nil
 }

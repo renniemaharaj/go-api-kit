@@ -213,3 +213,53 @@ func TestRunSupportsAnAPIWithoutAFrontendDirectory(t *testing.T) {
 		t.Fatalf("API-only startup did not reach the listener: %v", err)
 	}
 }
+
+func TestFrontendPreservesKitFileResponses(t *testing.T) {
+	isolateEnvironment(t)
+	app, err := v8.NewHandlerWithMiddleware(fstest.MapFS{
+		"file.txt": &fstest.MapFile{Data: []byte("abcdef")},
+	}, []kit.Middleware{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	initial := request(t, app, http.MethodGet, "/file.txt", "", "", http.StatusOK)
+	etag := initial.Header().Get("ETag")
+	if etag == "" || initial.Header().Get("Cache-Control") != "private, no-cache" {
+		t.Fatalf("kit file metadata was lost: %v", initial.Header())
+	}
+
+	for _, test := range []struct {
+		method string
+		header http.Header
+		status int
+		body   string
+	}{
+		{
+			method: http.MethodGet,
+			header: http.Header{"If-None-Match": {etag}},
+			status: http.StatusNotModified,
+		},
+		{
+			method: http.MethodGet,
+			header: http.Header{"Range": {"bytes=1-3"}},
+			status: http.StatusPartialContent,
+			body:   "bcd",
+		},
+		{
+			method: http.MethodHead,
+			status: http.StatusOK,
+		},
+	} {
+		request := httptest.NewRequest(test.method, "/file.txt", nil)
+		for name, values := range test.header {
+			request.Header[name] = values
+		}
+
+		response := httptest.NewRecorder()
+		app.ServeHTTP(response, request)
+		if response.Code != test.status || response.Body.String() != test.body {
+			t.Fatalf("%s %v: got %d %q", test.method, test.header, response.Code, response.Body.String())
+		}
+	}
+}
